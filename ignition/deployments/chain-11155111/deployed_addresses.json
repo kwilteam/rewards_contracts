@@ -1,4 +1,5 @@
 {
-  "KwilMockToken#KwilMockToken": "0xe2561bE8aCdE8E10FA83a46a1Bd8978DB9b7dA97",
-  "RewardDistributor#RewardDistributor": "0x528B94ff9218a7b5eaa6964b946172598F254E09"
+  "RewardDistributorSingleton#RewardDistributor": "0xf803c6B6557FB2337f403CCC46f356E74FF54305",
+  "RewardDistributorFactory#RewardDistributorFactory": "0x819Ab42a8798f037C27124cb4fd1d1fB6a434616",
+  "KwilMockToken#KwilMockToken": "0x5e4ba745f8444bD1924d5467943C7b6375a09a47"
 }
