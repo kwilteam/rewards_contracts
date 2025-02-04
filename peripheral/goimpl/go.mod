@@ -6,7 +6,7 @@ require (
 	github.com/FantasyJony/openzeppelin-merkle-tree-go v1.1.3
 	github.com/ethereum/go-ethereum v1.14.12
 	github.com/joho/godotenv v1.5.1
-	github.com/kwilteam/kwil-db/core v0.3.1-0.20250123164441-385aad68872a
+	github.com/kwilteam/kwil-db/core v0.3.1-0.20250129230732-c812c4745546
 	github.com/stretchr/testify v1.10.0
 	golang.org/x/exp v0.0.0-20241108190413-2d47ceb2692f
 )
