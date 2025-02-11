@@ -12,6 +12,6 @@ contract KwilMockToken is ERC20, ERC20Permit, Ownable {
     ERC20Permit("KwilMockToken")
     Ownable(initialOwner)
     {
-        _mint(msg.sender, 10_000 ** decimals());
+        _mint(msg.sender, 1_000_000 * 10 ** decimals());
     }
 }

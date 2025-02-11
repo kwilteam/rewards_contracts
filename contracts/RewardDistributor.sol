@@ -90,7 +90,7 @@ contract RewardDistributor is ReentrancyGuard {
         uint256 oldFee = posterFee;
         posterFee = newFee;
 
-        emit PosterFeeUpdated(oldFee,newFee);
+        emit PosterFeeUpdated(oldFee, newFee);
     }
 
     /// @notice This allows a user on behalf of the recipient to claim reward by providing
