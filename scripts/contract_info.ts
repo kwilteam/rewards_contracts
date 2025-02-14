@@ -14,7 +14,9 @@ async function info(addr: string) {
 }
 
 async function main() {
-    const addr = "0x528B94ff9218a7b5eaa6964b946172598F254E09";
+    const addr = "0x9de82e19b14f2f9be115dec63dd24d611d2b06bc ";
+
+    console.log("Current height: ", await hre.ethers.provider.getBlockNumber())
 
     info(addr);
 }

@@ -40,7 +40,7 @@ EOF
 run-fresh() {
   # we always use /tmp/.testnet/node0 as the Kwild root dir
   rm -rf /tmp/.testnet
-  docker run --rm -it -v /tmp:/tmp kwil-reward:latest setup testnet -v 1 -o /tmp/.testnet
+  docker run --rm -it -v /tmp:/tmp kwild:latest setup testnet -v 1 -o /tmp/.testnet
   perl -i -pe "s/^.*\"db_owner\":.*$/  \"db_owner\": \"$TEST_ADDRESS\",/g" /tmp/.testnet/node0/genesis.json
 
   _generate-svc-config

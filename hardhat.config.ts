@@ -18,7 +18,8 @@ const config: HardhatUserConfig = {
         mnemonic: process.env.SEPOLIA_MNEMONIC,
         initialIndex: 0,
         count: 4,
-      }
+      },
+        chainId: 11155111,  // chainId must be the same as the forking network
     },
   },
   solidity: {
@@ -31,6 +32,9 @@ const config: HardhatUserConfig = {
       evmVersion: `paris`, // https://github.com/NomicFoundation/hardhat/issues/4232
     }
   },
+  etherscan: {
+      apiKey: process.env.ETHERSCAN_API,
+  }
 };
 
 export default config;

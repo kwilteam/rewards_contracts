@@ -27,7 +27,7 @@ services:
       retries: 10
 
   kwild:
-    image: kwil-reward:latest
+    image: kwild:latest
     ports:
       - "8484:8484"
       - "6600:6600"
