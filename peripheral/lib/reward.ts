@@ -3,7 +3,7 @@ import {keccak256, AbiCoder, toBigInt, getBytes, Interface, BigNumberish, ethers
 import { StandardMerkleTree } from "@openzeppelin/merkle-tree";
 import { standardLeafHash } from "@openzeppelin/merkle-tree/dist/hashes";
 import {assert} from "chai";
-import {NodeKwil, Utils} from "../../kwil-js/dist"; // TODO: change this
+import {NodeKwil, Utils} from "@kwilteam/kwil-js";
 
 const MerkleLeafEncoding = ["address", "uint256", "address", "bytes32"];
 
@@ -52,6 +52,7 @@ function genRewardLeaf(recipient: string, amount: string, thisAddress: string, k
 }
 
 const RewardContractABI: string[] = [
+    "function safe() public view returns (address)",
     "function postReward(bytes32 rewardRoot, uint256 rewardAmount) external",
     "function updatePosterFee(uint256 newFee) external",
     "function rewardPoster(bytes32 root) public view returns (address)",
@@ -76,29 +77,35 @@ function genUpdatePosterFeeTxData(fee: BigNumberish): string {
 //     rewardContract = new ethers.Contract(rewardAddress, RewardContractABI, this.eth)
 // }
 
-interface KwilFinalizedReward {
+interface KwilEpoch {
     id: string;
-    voters: string[];
-    signatures: string[];
-    epoch_id: string;
-    created_at: number;
     start_height: number;
+    start_timestamp: number;
     end_height: number;
-    total_rewards: string;
-    reward_root: string,
-    safe_nonce: number,
-    sign_hash: string,
-    contract_id: string,
-    block_hash: string,
+    reward_root: string;
+    reward_amount: string;
+    end_block_hash: string;
+    voters: string[];
+    vote_amounts: string[];
+    vote_nonces: number[];
+    voter_signatures: string[];
 }
 
-/**
- * declare class KwilRewardPosterAPI { defines the reward distribution system API used by Poster service.
- */
+interface KwilRewardInstanceInfo {
+    chain: string;
+    escrow: string;
+    epoch_period: string;
+    erc20: string;
+    decimals: number;
+    balance: string;
+    synced: boolean;
+    synced_at: number;
+    enabled: boolean;
+}
+
 declare class KwilRewardPosterAPI {
-    // returns `limit` number of rewards since `afterBlockHeight`
-    ListFinalized(afterBlockHeight: number, limit: number): Promise<KwilFinalizedReward[]>
-    LatestFinalized(limit: number): Promise<KwilFinalizedReward[]>
+    GetActiveEpochs(): Promise<KwilEpoch[]>
+    Info(): Promise<KwilRewardInstanceInfo>
 }
 
 class KwilAPI implements KwilRewardPosterAPI {
@@ -110,34 +117,34 @@ class KwilAPI implements KwilRewardPosterAPI {
         this.ns = ns;
     }
 
-    async ListFinalized(blockHeight: number, limit: number): Promise<KwilFinalizedReward[]> {
+    async GetActiveEpochs(): Promise<KwilEpoch[]> {
         const callBody = {
             namespace: this.ns,
-            name: "list_finalized",
-            inputs: [{$param_1: blockHeight,$param_2: limit}]
+            name: "get_active_epochs",
+            inputs: []
         }
         // TODO: use stream API?
-        const res        = await this.kwil.call(callBody)
+        const res= await this.kwil.call(callBody)
         if (!res.data) {
             return [];
         }
 
-        return res.data.map(row => {return row as KwilFinalizedReward;});
+        return res.data.map(row => {return row as KwilEpoch;});
     }
 
-    async LatestFinalized(limit: number): Promise<KwilFinalizedReward[]> {
+    async Info(): Promise<KwilRewardInstanceInfo> {
         const callBody = {
             namespace: this.ns,
-            name: "latest_finalized",
-            inputs: [{$param_1: limit}]
+            name: "info",
+            inputs: []
         }
         // TODO: use stream API?
-        const res        = await this.kwil.call(callBody);
+        const res = await this.kwil.call(callBody)
         if (!res.data) {
-            return [];
+            throw new Error("failed to get reward info");
         }
 
-        return res.data.map(row => {return row as KwilFinalizedReward;});
+        return res.data.map(row => {return row as KwilRewardInstanceInfo;})[0];
     }
 }
 
@@ -151,7 +158,7 @@ export {
     getChainSpecificSaltNonce,
     RewardContractABI,
     // types
-    KwilFinalizedReward,
+    KwilEpoch,
     KwilAPI,
     KwilRewardPosterAPI
 }

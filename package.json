@@ -7,6 +7,7 @@
   "version": "0.0.1",
   "main": "index.js",
   "dependencies": {
+    "@kwilteam/kwil-js": "^0.9.0-beta.2",
     "@openzeppelin/contracts": "^5.2.0",
     "@openzeppelin/merkle-tree": "^1.0.7",
     "@safe-global/api-kit": "^2.5.4",

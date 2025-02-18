@@ -9,12 +9,19 @@ import {genPostRewardTxData, genUpdatePosterFeeTxData} from "./reward";
 import {RequestArguments} from "@safe-global/protocol-kit/dist/src/types/safeProvider";
 import {number} from "io-ts";
 import {cons} from "fp-ts/es6/Array";
+import {int} from "hardhat/internal/core/params/argumentTypes";
 
 type Eip1193Provider = {
     request: (args: RequestArguments) => Promise<unknown>;
 };
 
 type BigNumberish = string | number | bigint;
+
+interface SafeMeta {
+    nonce: number;
+    threshold: number;
+    owners: string[];
+}
 
 /**
  * RewardSafe is a wrapper on Safe core SDK to call RewardDistributor contract.
@@ -26,7 +33,7 @@ class RewardSafe {
 
     safeApiKit: SafeApiKit;
 
-    constructor(rpc: Eip1193Provider | string, chainID: bigint, safeAddress: string, rewardAddress: string, safeTxServiceUrl?: string) {
+    constructor(rpc: Eip1193Provider | string, chainID: bigint,rewardAddress: string, safeAddress: string,  safeTxServiceUrl?: string) {
         this.rpc = rpc;
         this.safeAddress = safeAddress;
         this.rewardAddress = rewardAddress;
@@ -118,10 +125,10 @@ class RewardSafe {
 
     // propose a new `postReward` transaction, with proposer's signature, to GnosisSafe tx service.
     async proposeRewardWithSignature(root: string, amount:BigNumberish, signerAddress: string, signerSignature: string): Promise<string>  {
-        const safe = await Safe.init({
-            provider: this.rpc,
-            safeAddress: this.safeAddress,
-        })
+        // const safe = await Safe.init({
+        //     provider: this.rpc,
+        //     safeAddress: this.safeAddress,
+        // })
 
         const {safeTx, safeTxHash} = await this.genPostRewardSafeTx(root, amount);
         await this.safeApiKit.proposeTransaction({
@@ -137,10 +144,10 @@ class RewardSafe {
 
     // confirm a new `postReward` transaction, with confirmer's signature, to GnosisSafe tx service.
     async confirmRewardWithSignature(root: string, amount:BigNumberish, signature: string) {
-        const safe = await Safe.init({
-            provider: this.rpc,
-            safeAddress: this.safeAddress
-        })
+        // const safe = await Safe.init({
+        //     provider: this.rpc,
+        //     safeAddress: this.safeAddress
+        // })
 
         const {safeTxHash} = await this.genPostRewardSafeTx(root, amount);
         await this.safeApiKit.confirmTransaction(
@@ -175,6 +182,16 @@ class RewardSafe {
 
         return safeTxHash
     }
+
+    async confirmTx(safeTxHash:string, signature:string) {
+        await this.safeApiKit.confirmTransaction(
+            safeTxHash,
+            signature
+        )
+
+        return safeTxHash
+    }
+
 
     // execute a GnosisSafe transaction (assume the threshold has reached).
     // Since safeTxHash represents an off-chain transaction, the signer can be any
@@ -216,6 +233,18 @@ class RewardSafe {
 
         return await safe.getNonce();
     }
+
+    async getMetadata() : Promise<SafeMeta> {
+        const safe = await Safe.init({
+            provider: this.rpc,
+            safeAddress: this.safeAddress,
+        })
+
+        // TODO: maybe use multicall3
+        return {nonce: await safe.getNonce(),
+                threshold: await safe.getThreshold(),
+                owners: await safe.getOwners()} as SafeMeta;
+    }
 }
 
-export { RewardSafe }
+export { RewardSafe , SafeMeta}

@@ -58,9 +58,9 @@ run-fresh() {
 
 
 build() {
-  cd peripheral/goimpl || exit 1
-  test -f go.work && go work vendor || go mod vendor
-  cd - || exit 1
+#  cd peripheral/goimpl || exit 1
+#  test -f go.work && go work vendor || go mod vendor
+#  cd - || exit 1
 
   $COMPOSE build
 }

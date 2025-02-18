@@ -1,8 +1,0 @@
-{
-  "kwil_rpc": "http://localhost:8484",
-  "private_key": "",
-  "kwil_namespace": "rewards",
-  "sync_after_block": 0, //REMOVE: if 0 and state is fresh, sync from latest
-  "sync_every": 60, //REMOVE: seconds
-  "state_file": "/tmp/kwil-reward-signer-state.json" //REMOVE: db file;absolute path
-}
