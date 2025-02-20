@@ -27,7 +27,7 @@ services:
       retries: 10
 
   kwild:
-    image: kwil-reward:latest
+    image: kwild:latest
     ports:
       - "8484:8484"
       - "6600:6600"
@@ -56,27 +56,18 @@ services:
       --db.pass=kwild
       --consensus.propose-timeout=1s
       --consensus.empty-block-timeout=1s
+      --erc20-reward-signer.enable=true
+      --erc20-reward-signer.targets=rewards
+      --erc20-reward-signer.private-keys=$TEST_PK
+      --erc20-reward-signer.eth-rpcs=$SEPOLIA_RPC
+      --
+      --extensions.sepolia_sync.provider $SEPOLIA_RPC_WSS
+      --extensions.sepolia_sync.block_sync_chunk_size='1000000'
     healthcheck:
       test: [ "CMD", "curl", "--fail-with-body", "-s", "http://localhost:8484/api/v1/health/user" ]
       interval: 2s
       timeout: 6s
       retries: 10
-
-  signer:
-    image: kwil-reward-signer:latest
-    build:
-      context: ./peripheral/goimpl
-      dockerfile: Dockerfile
-    volumes:
-      - type: bind
-        source: /tmp/kwil-reward-signersvc-config.json
-        target: /conf/config.json
-    networks:
-      - kwil-reward
-    command: /app/signersvc /conf/config.json
-    depends_on:
-      kwild:
-        condition: service_healthy
 
   poster:
     image: kwil-reward-poster:latest
@@ -93,6 +84,7 @@ services:
     depends_on:
       kwild:
         condition: service_healthy
+    restart: always
 
 networks:
   kwil-reward:

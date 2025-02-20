@@ -1,13 +1,18 @@
 import fs from "fs";
 
-interface FinalizedReward {
+interface EpochVote {
+    voter: string
+    nonce: number
+    amount: string
+    signature: string
+}
+
+interface FinalizedEpoch {
     root: string;
-    amount: string;
-    signers: string[];
-    signatures: string[];
-    createdAt: number;
-    safeNonce: number; // this is returned from Kwil
-    leafCount?: number;
+    total: string;
+    block: number;
+    votes: EpochVote[];
+    leafCount?: number
 }
 
 interface TxInfo {
@@ -17,26 +22,27 @@ interface TxInfo {
     postBlock: number;
     includeBlock?: number;
     accountNonce: number;
+    safeNonce: number;
 }
 
-interface RewardRecord {
-    request: FinalizedReward;
+interface EpochRecord {
+    epoch: FinalizedEpoch;
     result?: TxInfo;
 }
 
 // Main State class
 class State {
     private readonly path: string;
-    lastBlock: number;
-    rewards: RewardRecord[];
-    pending: number[];
-    index: Map<number, number>;
+
+    // in memory index; epochRoot=>idx
+    index: Map<string, number>;
+
+    // those will be written to disk
+    records: EpochRecord[];
 
     constructor(path: string = '') {
         this.path = path;
-        this.lastBlock = 0;
-        this.rewards = [];
-        this.pending = [];
+        this.records = [];
         this.index = new Map();
     }
 
@@ -53,9 +59,7 @@ class State {
 
         try {
             const data = {
-                lastBlock: this.lastBlock,
-                rewards: this.rewards,
-                pending: this.pending
+                rewards: this.records,
             };
 
             // Use synchronous write with fsync to ensure data is written to disk
@@ -76,75 +80,44 @@ class State {
         }
     }
 
-    // Adds rewards to the state, also put them in the pending queue.
-    async pendingRewardRecord(...rewards: FinalizedReward[]) {
-        for (const reward of rewards) {
-            this.rewards.push({ request: reward });
-            this.index.set(reward.createdAt!, this.rewards.length - 1);
-            this.pending.push(reward.createdAt!);
-            this.lastBlock = reward.createdAt!;
-        }
-
+    // Adds new record to the state
+    async newRecord(e: EpochRecord) {
+        this.records.push(e);
+        this.index.set(e.epoch.root, this.records.length - 1);
         this._sync();
     }
 
-    // Adds rewards to the state, without put them in pending queue.
-    async syncRewardRecord(...rewards: FinalizedReward[]) {
-        for (const reward of rewards) {
-            this.rewards.push({ request: reward });
-            this.index.set(reward.createdAt!, this.rewards.length - 1);
-            this.lastBlock = reward.createdAt!;
-        }
-
-        this._sync();
-    }
-
-    async updateResult(block: number, result: TxInfo) {
-        const index = this.index.get(block);
+    async updateResult(root: string, result: TxInfo) {
+        const index = this.index.get(root);
         if (index === undefined) {
-            throw new Error('Block not found');
+            throw new Error('Epoch not found');
         }
 
-        this.rewards[index].result = result;
-
-        if (result.includeBlock !== 0) {
-            this.pending = this.pending.filter(b => b !== block);
-        }
+        this.records[index].result = result;
 
         this._sync();
     }
 
-    async skipResult(block: number) {
-        this.pending = this.pending.filter(b => b !== block);
-        this._sync();
-    }
-
-    // Static method to load state from file
+    // Static method to load state from the given file
     static LoadStateFromFile(stateFile: string): State {
         const state = new State(stateFile);
 
-        const data = fs.readFileSync(stateFile, 'utf8');
+        const data = fs.readFileSync(stateFile, 'utf8').trim();
         if (data.length === 0) {
             return state;
         }
 
         const parsed = JSON.parse(data);
 
-        state.lastBlock = parsed.lastBlock;
-
         if (parsed.rewards) {
-            state.rewards = parsed.rewards;
-        }
-
-        if (parsed.pending) {
-            state.pending = parsed.pending;
+            state.records = parsed.rewards;
         }
 
         // Rebuild index from rewards
-        for (let i = 0; i < state.rewards.length; i++) {
-            const reward = state.rewards[i];
-            if (reward.request!.createdAt !== undefined) {
-                state.index.set(reward.request!.createdAt, i);
+        for (let i = 0; i < state.records.length; i++) {
+            const record = state.records[i];
+            if (record.epoch!.root !== undefined) {
+                state.index.set(record.epoch!.root, i);
             }
         }
 
@@ -154,7 +127,8 @@ class State {
 
 export {
     State,
-    RewardRecord,
-    FinalizedReward,
+    EpochRecord,
+    EpochVote,
+    FinalizedEpoch,
     TxInfo
 }

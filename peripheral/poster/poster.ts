@@ -1,11 +1,10 @@
 import {ethers, parseUnits, toBigInt} from "ethers";
 import pino from "pino";
 
-import {RewardContractABI, KwilAPI, KwilFinalizedReward} from "../lib/reward";
-import {RewardSafe} from "../lib/gnosis";
+import {KwilAPI, KwilEpoch} from "../lib/reward";
+import {RewardSafe, SafeMeta} from "../lib/gnosis";
 import {getTxRevertMessage} from "../lib/utils";
-import {FinalizedReward, RewardRecord, State} from "./state";
-import fs from "fs";
+import {FinalizedEpoch, EpochRecord, State, EpochVote} from "./state";
 
 const CONSTANTS = {
     FETCH_KWIL_REWARD_BATCH_LIMIT: 10,
@@ -14,26 +13,8 @@ const CONSTANTS = {
     EXTRA_TIP_IN_GWEI: 3,
 } as const
 
-function base64ToHex(s: string): string {
+function base64ToBytes32(s: string): string {
     return '0x' + Buffer.from(s, 'base64').toString('hex')
-}
-
-function toRewardRecord(finalizedReward: KwilFinalizedReward, decimals: bigint): FinalizedReward {
-    const signaturesInHex = finalizedReward.signatures.map(
-        base64ToHex
-    );
-
-    let amount = parseUnits(finalizedReward.total_rewards, decimals);
-
-    const reward: FinalizedReward = {
-        root: base64ToHex(finalizedReward.reward_root),
-        amount: amount.toString(),
-        signers: finalizedReward.voters,
-        signatures: signaturesInHex,
-        createdAt: finalizedReward.end_height, // the height when epoch reward is created
-        safeNonce: finalizedReward.safe_nonce,
-    };
-    return reward;
 }
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -43,8 +24,7 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 // executing GnosisSafe transaction.
 // If the provided state.lastBlock is set, it will sync from that block.
 class EVMPoster {
-    private readonly rewardContract
-    private readonly rewardDecimal: bigint = 0n
+    private readonly rewardContract: ethers.Contract
     private readonly eth: ethers.Provider
     private readonly safe: RewardSafe
     private readonly kwil: KwilAPI
@@ -54,7 +34,7 @@ class EVMPoster {
 
     constructor(
       rewardSafe: RewardSafe,
-      rewardAddress: string,
+      rewardContract: ethers.Contract,
       signer: ethers.Wallet,
       kwil: KwilAPI,
       ethProvider: ethers.Provider,
@@ -66,226 +46,208 @@ class EVMPoster {
         this.signer = signer
         this.eth = ethProvider
         this.safe = rewardSafe
-        this.rewardContract = new ethers.Contract(rewardAddress, RewardContractABI, this.eth)
-        this.rewardDecimal = this.rewardContract.decimals;
+        this.rewardContract = rewardContract
         this.logger = logger;
     }
 
     // get a list of finalized rewards and handle them in batch.
     // we CANNOT use `LatestFinalized` as it will skip some rewards.
-    async fetchPendingRewards(): Promise<void> {
-        try {
-            this.logger.debug('Fetching pending rewards')
-            const reqs = await this.kwil.ListFinalized(
-            this.state.lastBlock,
-            CONSTANTS.FETCH_KWIL_REWARD_BATCH_LIMIT)
+    async fetchActiveFinalizedEpoch(safeMeta: SafeMeta): Promise<FinalizedEpoch | null> {
+        this.logger.debug('Fetching active epoch')
+        const reqs: KwilEpoch[] = await this.kwil.GetActiveEpochs()
 
-            if (reqs.length === 0) {
-              this.logger.debug("No new rewards")
-              return
-            }
-
-            let rewards = reqs.map(req => {
-              return toRewardRecord(req, this.rewardDecimal);
-            });
-
-            rewards = rewards.filter(r => r.createdAt > this.state.lastBlock);
-
-            await this.state.pendingRewardRecord(...rewards);
-
-            // Check if rewards already posted
-            for (const r of rewards) {
-              this.logger.info({ root: r.root, kwilBlock: r.createdAt }, 'New finalized reward')
-              const poster = await this.rewardContract.rewardPoster(r.root)
-
-              if (poster !== ethers.ZeroAddress) {
-                  this.logger.info({
-                    root: r.root,
-                    kwilBlock: r.createdAt
-                  }, 'Reward already posted, skipping')
-
-                  await this.state.skipResult(r.createdAt)
-              }
-           }
-        } catch (err) {
-            this.logger.error(err, 'Failed to fetch finalized rewards')
+        if (reqs.length === 0) {
+            throw new Error('no active epochs')
         }
-    }
 
-    // Syncs already posted rewards to local state/db from state.lastBlock.
-    // NOTE: do we really need this? I only need the next reward to post.
-    // TODO: if the extension implements `newer_finalized`, we can use that
-    // API directly, to get the next reward that needs to be posted
-    async fastSync() {
-        // all rewards with older safeNonce are posted.
+        if (reqs.length == 1) {
+            // this only happens on the very first epoch, we just skip and wait until it finalizes
+            return null;
+        }
 
-        const safeNonce = await this.safe.getNonce();
-        let syncing = true;
-        const batchSize = 30;
+        if (reqs.length != 2) {
+            throw new Error('unexpected number of active epochs')
+        }
 
-        while (syncing) {
-            try {
-                this.logger.info({afterBlock: this.state.lastBlock, batch: batchSize}, 'fast sync posted rewards')
+        // the first one has finalized
+        const reqEpoch = reqs[0];
 
-                const reqs = await this.kwil.ListFinalized(
-                    this.state.lastBlock, batchSize)
+        if (reqEpoch.voters === null) {
+            return null
+        }
 
-                if (reqs.length === 0) { // Since API returns include current
-                    syncing = false;
-                    break // synced
+        const epoch: FinalizedEpoch = {
+            root: base64ToBytes32(reqEpoch.reward_root),
+            total: reqEpoch.reward_amount,
+            block: reqEpoch.end_height, // the height when epoch reward is created
+            votes: reqEpoch.voters.map((v, idx): EpochVote=> {
+                if (reqEpoch.voters !== null) {
+                    return {
+                        voter: reqEpoch.voters[idx],
+                        amount: reqEpoch.vote_amounts[idx],
+                        nonce: reqEpoch.vote_nonces[idx],
+                        signature: reqEpoch.voter_signatures[idx]
+                    } as EpochVote;
                 }
 
-                let rewards = reqs.map(req => {
-                    return toRewardRecord(req, this.rewardDecimal);
-                });
+                return {} as EpochVote;
+            }),
+        };
 
-                if (rewards[0].safeNonce >= safeNonce) {
-                    syncing = false;
-                    break // synced
-                }
-                rewards = rewards.filter(r => (r.createdAt > this.state.lastBlock && r.safeNonce < safeNonce) );
-                await this.state.syncRewardRecord(...rewards);
-
-                await delay(1000);
-            } catch (err) {
-                this.logger.error(err, 'Failed to sync finalized rewards')
-                syncing = false;
-                break // synced
-            }
+        epoch.votes = epoch.votes.filter(v => v.nonce === safeMeta.nonce);
+        if (epoch.votes.length < safeMeta.threshold) {
+            return null;
         }
 
-        this.logger.info({lastBlock: this.state.lastBlock}, 'start to sync new rewards')
+
+        return epoch;
     }
 
-    async checkRewardPostingStatus() {
-        if (this.state.pending.length === 0) {
-            return
-        }
+    async postEpoch(epoch: FinalizedEpoch, safeMeta: SafeMeta, prioritizeTipInGwei: number = 0, prioritizeNonce: number, prioritize: boolean) {
+        let root: string = epoch.root;
+        // amount and nonce match
+        const eligibleVotes = epoch.votes.filter(
+            v => v.nonce === safeMeta.nonce && v.amount === epoch.total)
 
-        const block :number = this.state.pending[0];
-        this.logger.info({kwilBlock: block}, 'Checking reward status')
-        if (!this.state.index.has(block)) {
-            this.logger.info('Reward block not found', { block })
-            return
-        }
+        const proposer = eligibleVotes[0].voter
+        const proposerSignature = eligibleVotes[0].signature
+        let proposeAmount: string = eligibleVotes[0].amount // need to use the correct one
 
-        const reward = this.state.rewards[this.state.index.get(block)!];
+        console.log("000000000sig.    ", proposerSignature, base64ToBytes32(proposerSignature))
 
-        try {
-            if (reward.result === undefined) {
-                await this.postReward(reward, 0, false);
-            } else {
-                await this.followEVMTx(reward);
-            }
-        } catch (err) {
-            this.logger.error(err, 'Failed to post reward')
-        }
-    }
-
-    async postReward(rd: RewardRecord, extraTipInGwei: number = 0, prioritize: boolean) {
-        const root = Buffer.from(rd.request.root, 'hex')
-
-        const currentBlock = await this.eth.getBlockNumber()
-        const accountNonce = await this.eth.getTransactionCount(this.signer.address)
-
-        const proposer = rd.request.signers[0]
-        const proposerSignature = rd.request.signatures[0]
-
-        // TODO: check if the contract has enough token, i.e. `token.balanceOf(rd.ContractAddress) >= rd.request.amount`
+        // TODO: check if the contract has enough token, i.e. `token.balanceOf(epoch.ContractAddress) >= epoch.request.amount`
 
         // NOTE: maybe Kwil API can also return the safeTxHash associated with Reward? seems not necessary
         // propose GnosisSafe tx
-        const safeTxHash = await this.safe.proposeRewardWithSignature(rd.request.root, rd.request.amount,
-            proposer, ethers.toQuantity(proposerSignature));
+        const safeTxHash = await this.safe.proposeRewardWithSignature(root, proposeAmount,
+            proposer, base64ToBytes32(proposerSignature));
 
-        this.logger.info({ root: rd.request.root, amount: rd.request.amount,
-            safeTxHash: safeTxHash, safeNonce: rd.request.safeNonce, proposer: proposer},
-            "Propose safe tx")
+        this.logger.info({ root: root, amount: proposeAmount, safeNonce: safeMeta.nonce,
+             safeTxHash: safeTxHash, proposer: proposer}, "Propose safe tx")
 
-        // confirm GnosisSafe tx
-        for (let i = 1; i < rd.request.signers.length; i++) {
-            const signature = rd.request.signatures[i]
-            await this.safe.confirmRewardWithSignature(rd.request.root, rd.request.amount, ethers.toQuantity(signature));
-            this.logger.info({ root: rd.request.root, amount: rd.request.amount,
-                safeTxHash: safeTxHash, safeNonce: rd.request.safeNonce, signer: rd.request.signers[i]},
+        // confirm GnosisSafe tx; TODO: maybe only use least required signatures, to safe gas.
+        for (const vote of eligibleVotes) {
+            // await this.safe.confirmRewardWithSignature(root, amount, ethers.toQuantity(signature));
+            await this.safe.confirmTx(safeTxHash, base64ToBytes32(vote.signature));
+            this.logger.info({safeNonce: safeMeta.nonce, safeTxHash: safeTxHash, signer: vote.voter},
                 "Confirm safe tx")
         }
 
         const feeData = await this.eth.getFeeData();
 
         // execute GnosisSafe tx
+        const currentBlock = await this.eth.getBlockNumber()
+        const accountNonce = await this.eth.getTransactionCount(this.signer.address)
         const txHash = await this.safe.executeTx(safeTxHash, this.signer.privateKey, this.signer.address,
             feeData.maxFeePerGas!.toString(),
-            (feeData.maxPriorityFeePerGas! + toBigInt(extraTipInGwei)).toString(),
-            prioritize ? rd.result!.accountNonce! : undefined);
+            (feeData.maxPriorityFeePerGas! + toBigInt(prioritizeTipInGwei)).toString(),
+            prioritize ? prioritizeNonce : undefined);
 
-        this.logger.info({ root: rd.request.root, amount: rd.request.amount,
+        this.logger.info({ root: root, amount: proposeAmount,
             safeTxHash: safeTxHash, txHash: txHash, block: currentBlock},
             "Execute safe tx, post reward")
 
         // get posted tx info
         const tx = await this.eth.getTransaction(txHash);
 
-        await this.state.updateResult(rd.request.createdAt, {
-            hash: txHash,
-            fee: (tx!.gasPrice * tx!.gasLimit).toString(),
-            gasPrice: tx!.gasPrice.toString(),
-            postBlock: currentBlock,
-            includeBlock: 0,
-            accountNonce: accountNonce,
-        });
-    }
-
-    async followEVMTx(rd: RewardRecord) {
-        const currentBlock = await this.eth.getBlockNumber()
-        const tx = await this.eth.getTransaction(rd.result!.hash);
-        if (tx!.blockNumber === null) { // pending
-            if (currentBlock - rd.result!.postBlock > CONSTANTS.NUM_OF_WAIT_TOO_LONG) {
-                this.logger.info( { root: rd.request.root, tx: rd.result!.hash, waited: currentBlock - rd.result!.postBlock}, 'tx has been pending for too long, prioritize it. ')
-                await this.postReward(rd, CONSTANTS.EXTRA_TIP_IN_GWEI, true);
-                return
-            }
-
-            this.logger.info({ root: rd.request.root, tx: rd.result!.hash, waited: currentBlock - rd.result!.postBlock }, 'Tx still pending, hash:')
-            return
-        }
-
-        const txReceipt = await this.eth.getTransactionReceipt(rd.result!.hash);
-
-        if (txReceipt!.status === 1) {
-            if (currentBlock - txReceipt!.blockNumber! > CONSTANTS.NUM_OF_CONFIRMATION) {
-                this.logger.info({ root: rd.request.root, tx: rd.result!.hash, block: txReceipt!.blockNumber! }, "reward Tx confirmed ")
-                await this.state.updateResult(rd.request.createdAt, {
-                    hash: rd.result!.hash,
-                    fee: txReceipt!.fee!.toString(),
-                    gasPrice: txReceipt!.gasPrice.toString(),
-                    postBlock: rd.result!.postBlock,
-                    includeBlock: txReceipt!.blockNumber!,
-                    accountNonce: rd.result?.accountNonce!,
-                })
-
-                return
-            }
-
-            this.logger.info({ root: rd.request.root, tx: rd.result!.hash, block: txReceipt!.blockNumber! }, "reward Tx included but not confirmed yet")
-            return
-        }
-
-        const revertMsg = await getTxRevertMessage(this.eth, tx!);
-        // const txResp = await txReceipt?.getResult();
-        this.logger.info({ tx: rd.result!.hash, waited: currentBlock - rd.result!.postBlock, err: revertMsg }, 'Tx failed',)
+        await this.state.newRecord({
+            epoch: epoch,
+            result: {
+                        hash: txHash,
+                        fee: (tx!.gasPrice * tx!.gasLimit).toString(),
+                        gasPrice: tx!.gasPrice.toString(),
+                        postBlock: currentBlock,
+                        includeBlock: 0,
+                        accountNonce: accountNonce,
+                        safeNonce: safeMeta.nonce
+                    }})
     }
 
     async runOnce() {
-        await this.fetchPendingRewards(); // Should execute both together
-        await this.checkRewardPostingStatus();
+        const safeMeta = await this.safe.getMetadata()
+        // we always use the latest epoch from Kwil, since there might be more vote
+        const newEpoch = await this.fetchActiveFinalizedEpoch(safeMeta);
+        if (newEpoch === null) {
+            this.logger.info('No postable finalized epoch found')
+            return
+        }
+
+        // we get one epoch with enough votes, and the epoch could be in those state:
+        // - totally new to posterSvc;
+        // - posterSvc has posted this epoch; If posterSvc see this, we know it's not confirmed on Kwil; then we either wait or re-submit with higher gas tip
+
+        // if no state, then this is the first epoch posterSvc ever seen
+        if (this.state.records.length === 0) {
+            this.logger.info('First epoch, posting it')
+            await this.postEpoch(newEpoch, safeMeta, 0, 0, false);
+            return
+        }
+
+        const lastRecord = this.state.records[this.state.records.length - 1];
+
+        if (lastRecord  && lastRecord.epoch.root !== newEpoch.root) {
+            this.logger.info({ root: newEpoch.root, nonce: safeMeta.nonce }, 'New epoch, posting it')
+            // new epoch for posterSvc; so we know last epoch is confirmed
+            // We use Kwil's state not posterSvc's state to determine whether an epoch is confirmed.
+            await this.postEpoch(newEpoch , safeMeta, 0, 0, false);
+        } else {
+            this.logger.info({ root: newEpoch.root, nonce: safeMeta.nonce }, 'Posted epoch, checking status')
+
+            // NOTE: what if Safe is updated(nonce changed) after posterSvc submit the tx?
+            // If that's the case, the tx will fail eventually. Although we waste some gas, but this is simpler mental model.
+            // So we just wait the tx to fail, and re-submit with newer safe nonce.
+
+            const currentBlock = await this.eth.getBlockNumber()
+            const tx = await this.eth.getTransaction(lastRecord.result!.hash);
+            // If tx is still pending, i.e. in EVM mempool
+            if (tx!.blockNumber === null) {
+                if (currentBlock - lastRecord.result!.postBlock > CONSTANTS.NUM_OF_WAIT_TOO_LONG) {
+                    this.logger.info( { root: lastRecord.epoch.root, tx: lastRecord.result!.hash, waited: currentBlock - lastRecord.result!.postBlock}, 'tx has been pending for too long, prioritize it. ')
+                    const lastRecordTxNonce = lastRecord.result!.accountNonce!;
+                    await this.postEpoch(lastRecord.epoch, safeMeta, CONSTANTS.EXTRA_TIP_IN_GWEI, lastRecord.result!.accountNonce, true);
+                    return
+                }
+
+                this.logger.info({ root: lastRecord.epoch.root, tx: lastRecord.result!.hash, waited: currentBlock - lastRecord.result!.postBlock }, 'Tx still pending, hash:')
+                return
+            }
+
+            // If tx is included in a block
+            const txReceipt = await this.eth.getTransactionReceipt(lastRecord.result!.hash);
+
+            // If tx succeeds
+            if (txReceipt!.status === 1) {
+                if (currentBlock - txReceipt!.blockNumber! > CONSTANTS.NUM_OF_CONFIRMATION) {
+                    this.logger.info({ root: lastRecord.epoch.root, tx: lastRecord.result!.hash, block: txReceipt!.blockNumber! }, "rewalastRecord Tx confirmed ")
+                    await this.state.updateResult(lastRecord.epoch.root, {
+                        hash: lastRecord.result!.hash,
+                        fee: txReceipt!.fee!.toString(),
+                        gasPrice: txReceipt!.gasPrice.toString(),
+                        postBlock: lastRecord.result!.postBlock,
+                        includeBlock: txReceipt!.blockNumber!,
+                        accountNonce: lastRecord.result?.accountNonce!,
+                        safeNonce: lastRecord.result?.safeNonce!,
+                    })
+
+                    return
+                }
+
+                this.logger.info({ root: lastRecord.epoch.root, tx: lastRecord.result!.hash, block: txReceipt!.blockNumber! }, "rewalastRecord Tx included but not confirmed yet")
+                return
+            }
+
+            // Then tx fail
+            const revertMsg = await getTxRevertMessage(this.eth, tx!);
+            // const txResp = await txReceipt?.getResult();
+            this.logger.info({ tx: lastRecord.result!.hash, waited: currentBlock - lastRecord.result!.postBlock, err: revertMsg }, 'Tx failed',)
+            // most likely due to the safe nonce issue. we re-post it with new safe metadata
+            await this.postEpoch(newEpoch , safeMeta, 0, 0,false);
+        }
     }
 
-    // this is how the poster should run.
+    // this just shows how the poster should run. Don't run this
     async _run(interval: number)
     {
-        await this.fastSync();
-
         setInterval(async () => {
             await this.runOnce()
         }, interval) // should be long enough so that TX is posted and stated is synced to disk, before the next round of checking
@@ -293,4 +255,4 @@ class EVMPoster {
 
 }
 
-export { KwilAPI, EVMPoster }
+export { KwilAPI, EVMPoster, base64ToBytes32}

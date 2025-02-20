@@ -2,19 +2,18 @@ import {ethers} from "ethers";
 import fs from "fs";
 import pino from "pino";
 
-import {EVMPoster, KwilAPI} from "./poster";
+import {EVMPoster, KwilAPI, base64ToBytes32} from "./poster";
 import {RewardSafe} from "../lib/gnosis";
 import {State} from "./state";
+import {RewardContractABI} from "../lib/reward";
 
 interface PosterConfig {
     "eth_rpc": string,
     "private_key": string,
-    "safe_address": string,
-    "reward_address": string,
-    "sync_every": number,
     "kwil_rpc": string,
     "kwil_chain_id": string,
     "kwil_namespace": string,
+    "sync_every": 60000, //REMOVE: milliseconds
     "state_file": string,
 }
 
@@ -99,13 +98,9 @@ async function main(): Promise<void> {
     const cfg = loadConfig(configPath);
 
     const kwil = new KwilAPI(cfg.kwil_rpc, cfg.kwil_chain_id, cfg.kwil_namespace)
-    try {
-        await kwil.LatestFinalized(1)
-    } catch (err) {
-        // NOTE: just log, don't exit
-        // This is maily for the docker, bc the `namespace` may not created yet
-        console.log("Cannot connecting to kwil", err);
-    }
+
+    const rewardInstance = await kwil.Info();
+    console.log("Reward instance:", rewardInstance);
 
     let state: State = new State(); // in memory state
     if (cfg.state_file != "") {
@@ -116,8 +111,12 @@ async function main(): Promise<void> {
     }
 
     const eth = new ethers.JsonRpcProvider(cfg.eth_rpc);
+    console.log("reward escrow address: ", rewardInstance.escrow.toString())
+    const rewardContract = new ethers.Contract(rewardInstance.escrow.toString(), RewardContractABI, eth);
+    const safeAddr = await rewardContract.safe()
+
     const ethNetwork = await eth.getNetwork();
-    const rewardSafe = new RewardSafe(cfg.eth_rpc, ethNetwork.chainId, cfg.safe_address, cfg.reward_address);
+    const rewardSafe = new RewardSafe(cfg.eth_rpc, ethNetwork.chainId, rewardInstance.escrow, safeAddr);
     const posterSigner = new ethers.Wallet(cfg.private_key, eth);
 
     const logger = getLogger();
@@ -128,7 +127,7 @@ async function main(): Promise<void> {
 
     const p = new EVMPoster(
         rewardSafe,
-        cfg.reward_address,
+        rewardContract,
         posterSigner,
         kwil,
         eth,
@@ -138,7 +137,6 @@ async function main(): Promise<void> {
 
     console.log(`Starting the poster. Press Ctrl-C to quit.`);
 
-    await p.fastSync(); // sync first
     await p.runOnce() // run first time
     const intervalHandler = setInterval(async () => {
         try {
