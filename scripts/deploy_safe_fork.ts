@@ -17,6 +17,9 @@ async function deploySafe() {
         return;
     }
 
+    console.log(`Deploy safe on ${hre.network.name}/${hre.network.config.chainId}`)
+    console.log("Current block: ", await hre.ethers.provider.getBlockNumber())
+
     let actConfig: HardhatNetworkHDAccountsConfig = hre.network.config.accounts as HardhatNetworkHDAccountsConfig;
     console.log("current block: ", await hre.ethers.provider.getBlockNumber())
 

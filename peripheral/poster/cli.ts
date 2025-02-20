@@ -137,7 +137,6 @@ async function main(): Promise<void> {
 
     console.log(`Starting the poster. Press Ctrl-C to quit.`);
 
-    // await p.fastSync(); // sync first
     await p.runOnce() // run first time
     const intervalHandler = setInterval(async () => {
         try {

@@ -73,10 +73,6 @@ function genUpdatePosterFeeTxData(fee: BigNumberish): string {
     return iface.encodeFunctionData('updatePosterFee', [fee]);
 }
 
-// function ClaimReward(rewardAddress: string, recipient: string, amount: BigNumberish, kwilBlock: BigNumberish, root: string, proof: string[]): string {
-//     rewardContract = new ethers.Contract(rewardAddress, RewardContractABI, this.eth)
-// }
-
 interface KwilEpoch {
     id: string;
     start_height: number;

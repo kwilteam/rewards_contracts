@@ -34,58 +34,6 @@ So, if this is your first time, type:
 ./dev.sh run-fresh
 ```
 
-### Testing the reward system
-
-With `dev.sh` running every service, we'll test the reward system using kwil-cli.
-
-```shell
-# create a erc20_rewards targeting our Sepolia contract.
-# NOTE: don't change `AS rewards`, since signerSVC/posterSVC use it.
-.build/kwil-cli exec-sql "USE erc20_rewards {
-    chain_id: 11155111, // target EVM chain id
-    contract_address: '0x...', // target RewardDistributor contract address
-    contract_nonce: 0, // RewardDistributor.nonce
-    signers: '0x...,0x...,0x...', // the Signers you set in GnosisSafe wallet
-    threshold: 1, // the confirmation settions in GnosisSafe wallet
-    decimals: 18, // denotation of your reward token
-    safe_address: '0x...', // GnosisSafe wallet address
-    safe_nonce: 2 // GnosisSafe wallet nonce
-} AS rewards;" --sync
-
-# create a namespace to write our MoneyAPP logic
-.build/kwil-cli exec-sql "CREATE NAMESPACE IF NOT EXISTS money;" --sync
-
-# create an action in our MoneyAPP to issue reward to 0x...
-.build/kwil-cli exec-sql "{money}CREATE ACTION issue_reward1() public {
-        rewards.issue_reward('0x..',0.01::numeric(60,18));
-}" --sync
-
-# create an action in our MoneyAPP to issue reward to the caller.
-.build/kwil-cli exec-sql "{money}CREATE ACTION issue_reward2() public {
-        rewards.issue_reward(@caller,0.01::numeric(60,18));
-}" --sync
-
-# call our MoneyAPP's action to issue reward
-.build/kwil-cli exec-action issue_reward1 -n money --sync
-.build/kwil-cli exec-action issue_reward2 -n money --sync
-
-# search the rewards being issued.
-# Note: the reward will be accumulated.
-.build/kwil-cli call-action search_rewards -n rewards int:0 int:10000
-
-# propose a reward epoch.
-# NOTE: this should/will be called by Kwil network automatically.
-.build/kwil-cli exec-action propose_epoch -n rewards --sync
-
-# list epoch rewards that are proposed.
-# NOTE: those rewards will be picked up by SignerSvc.
-.build/kwil-cli call-action list_epochs -n rewards int:0 int:10
-
-# list finalized rewards.
-# NOTE: Those rewards will be picked up by PosterSvc.
-.build/kwil-cli call-action latest_finalized -n rewards int:10
-```
-
 ### Documentations
 
 - [overview](./docs/README.md)

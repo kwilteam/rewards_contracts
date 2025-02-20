@@ -38,16 +38,11 @@ class State {
     index: Map<string, number>;
 
     // those will be written to disk
-    // lastBlock: number;
     records: EpochRecord[];
-    // pending: number[];
-
 
     constructor(path: string = '') {
         this.path = path;
-        // this.lastBlock = 0;
         this.records = [];
-        // this.pending = [];
         this.index = new Map();
     }
 
@@ -64,9 +59,7 @@ class State {
 
         try {
             const data = {
-                // lastBlock: this.lastBlock,
                 rewards: this.records,
-                // pending: this.pending
             };
 
             // Use synchronous write with fsync to ensure data is written to disk
@@ -87,58 +80,25 @@ class State {
         }
     }
 
-    // Adds rewards to the state, also put them in the pending queue.
-    async pendingRewardRecord(...epochs: FinalizedEpoch[]) {
-        for (const e of epochs) {
-            this.records.push({ epoch: e });
-            this.index.set(e.root, this.records.length - 1);
-            // this.pending.push(e.block!);
-            // this.lastBlock = e.block!;
-        }
-
-        this._sync();
-    }
-
-    // Adds rewards to the state, without put them in pending queue.
-    async syncRewardRecord(...epochs: FinalizedEpoch[]) {
-        for (const e of epochs) {
-            this.records.push({ epoch: e });
-            this.index.set(e.root, this.records.length - 1);
-            // this.lastBlock = e.block!;
-        }
-
-        this._sync();
-    }
-
+    // Adds new record to the state
     async newRecord(e: EpochRecord) {
         this.records.push(e);
         this.index.set(e.epoch.root, this.records.length - 1);
-        // this.pending.push(e.epoch.block!);
-        // this.lastBlock = e.epoch.block!;
         this._sync();
     }
 
     async updateResult(root: string, result: TxInfo) {
         const index = this.index.get(root);
         if (index === undefined) {
-            throw new Error('Block not found');
+            throw new Error('Epoch not found');
         }
 
         this.records[index].result = result;
 
-        // if (result.includeBlock !== 0) {
-        //     this.pending = this.pending.filter(b => b !== block);
-        // }
-
         this._sync();
     }
 
-    // async skipResult(block: number) {
-    //     this.pending = this.pending.filter(b => b !== block);
-    //     this._sync();
-    // }
-
-    // Static method to load state from file
+    // Static method to load state from the given file
     static LoadStateFromFile(stateFile: string): State {
         const state = new State(stateFile);
 
@@ -146,7 +106,6 @@ class State {
         if (data.length === 0) {
             return state;
         }
-
 
         const parsed = JSON.parse(data);
 
@@ -156,9 +115,9 @@ class State {
 
         // Rebuild index from rewards
         for (let i = 0; i < state.records.length; i++) {
-            const reward = state.records[i];
-            if (reward.epoch!.root !== undefined) {
-                state.index.set(reward.epoch!.root, i);
+            const record = state.records[i];
+            if (record.epoch!.root !== undefined) {
+                state.index.set(record.epoch!.root, i);
             }
         }
 

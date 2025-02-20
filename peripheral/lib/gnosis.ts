@@ -7,9 +7,6 @@ import {
 
 import {genPostRewardTxData, genUpdatePosterFeeTxData} from "./reward";
 import {RequestArguments} from "@safe-global/protocol-kit/dist/src/types/safeProvider";
-import {number} from "io-ts";
-import {cons} from "fp-ts/es6/Array";
-import {int} from "hardhat/internal/core/params/argumentTypes";
 
 type Eip1193Provider = {
     request: (args: RequestArguments) => Promise<unknown>;

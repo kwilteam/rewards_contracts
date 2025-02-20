@@ -1,7 +1,7 @@
 import {ethers, parseUnits, toBigInt} from "ethers";
 import pino from "pino";
 
-import {RewardContractABI, KwilAPI, KwilEpoch} from "../lib/reward";
+import {KwilAPI, KwilEpoch} from "../lib/reward";
 import {RewardSafe, SafeMeta} from "../lib/gnosis";
 import {getTxRevertMessage} from "../lib/utils";
 import {FinalizedEpoch, EpochRecord, State, EpochVote} from "./state";
@@ -54,7 +54,7 @@ class EVMPoster {
     // we CANNOT use `LatestFinalized` as it will skip some rewards.
     async fetchActiveFinalizedEpoch(safeMeta: SafeMeta): Promise<FinalizedEpoch | null> {
         this.logger.debug('Fetching active epoch')
-        const reqs = await this.kwil.GetActiveEpochs()
+        const reqs: KwilEpoch[] = await this.kwil.GetActiveEpochs()
 
         if (reqs.length === 0) {
             throw new Error('no active epochs')
@@ -174,8 +174,6 @@ class EVMPoster {
 
         // we get one epoch with enough votes, and the epoch could be in those state:
         // - totally new to posterSvc;
-        // - - we need to make sure we haven't posted this epoch before, by checking EVM
-        // - - IF we did
         // - posterSvc has posted this epoch; If posterSvc see this, we know it's not confirmed on Kwil; then we either wait or re-submit with higher gas tip
 
         // if no state, then this is the first epoch posterSvc ever seen
@@ -193,15 +191,11 @@ class EVMPoster {
             // We use Kwil's state not posterSvc's state to determine whether an epoch is confirmed.
             await this.postEpoch(newEpoch , safeMeta, 0, 0, false);
         } else {
-            this.logger.info({ root: newEpoch.root, nonce: safeMeta.nonce }, 'Same epoch, checking status')
-            // posterSvc has posted it already
+            this.logger.info({ root: newEpoch.root, nonce: safeMeta.nonce }, 'Posted epoch, checking status')
 
-            // what if Safe is updated(nonce changed) after posterSvc submit the tx?
+            // NOTE: what if Safe is updated(nonce changed) after posterSvc submit the tx?
             // If that's the case, the tx will fail eventually. Although we waste some gas, but this is simpler mental model.
             // So we just wait the tx to fail, and re-submit with newer safe nonce.
-
-            // await this.waitEVMTx(record, safeMeta);
-
 
             const currentBlock = await this.eth.getBlockNumber()
             const tx = await this.eth.getTransaction(lastRecord.result!.hash);
