@@ -1,6 +1,6 @@
 import hre from "hardhat";
 import dotenv from 'dotenv';
-import RewardDistributorFactoryModule from "../ignition/modules/RewardDistributorFacotry";
+import RewardDistributorFactoryModule from "../ignition/modules/RewardDistributorFactory";
 import {HardhatEthersSigner} from "@nomicfoundation/hardhat-ethers/signers";
 import RewardDistributorSingletonModule from "../ignition/modules/RewardDistributorSingleton";
 

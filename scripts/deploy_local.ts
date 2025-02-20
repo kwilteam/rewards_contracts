@@ -1,6 +1,6 @@
 import hre from "hardhat";
 import RewardDistributorSingletonModule from "../ignition/modules/RewardDistributorSingleton";
-import RewardDistributorFactoryModule from "../ignition/modules/RewardDistributorFacotry";
+import RewardDistributorFactoryModule from "../ignition/modules/RewardDistributorFactory";
 import {HardhatEthersSigner} from "@nomicfoundation/hardhat-ethers/signers";
 import KwilMockToken from "../ignition/modules/KwilMockToken";
 import {getChainSpecificDefaultSaltNonce} from "../peripheral/lib/reward";
