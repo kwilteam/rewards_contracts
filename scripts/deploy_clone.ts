@@ -40,7 +40,6 @@ async function deploy(chainId: number, deployer:HardhatEthersSigner, safeAddr: s
 }
 
 async function main() {
-
     console.log("Current block height: ", await hre.ethers.provider.getBlockNumber())
     console.log("Current chainId: ", hre.network.config.chainId)
     console.log("Current network: ", hre.network.name)
@@ -49,9 +48,24 @@ async function main() {
     const [deployer] = await hre.ethers.getSigners();
     const deployerNonce = await deployer.getNonce()
 
-    const safeAddr = "0x56D510E4782cDed87F8B93D260282776adEd3f4B";
-    const rewardTokenAddr = "0x5e4ba745f8444bD1924d5467943C7b6375a09a47";
-    const initFee = "0.001";
+    const safeAddr = "";
+    const rewardTokenAddr = "";
+    const initFee = ""; // at most 0.01 ether
+
+    if (safeAddr === "") {
+        console.log("safe address is not configured")
+        return;
+    }
+
+    if (rewardTokenAddr === "") {
+        console.log("reward token address is not configured")
+        return;
+    }
+
+    if (initFee === "") {
+        console.log("init fee is not configured")
+    }
+
     const saltNonce = getChainSpecificSaltNonce(chainId.toString(),
         deployer.address,
         deployerNonce.toString());
