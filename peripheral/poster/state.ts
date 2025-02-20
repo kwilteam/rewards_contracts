@@ -3,7 +3,6 @@ import fs from "fs";
 interface EpochVote {
     voter: string
     nonce: number
-    amount: string
     signature: string
 }
 

@@ -84,7 +84,6 @@ class EVMPoster {
                 if (reqEpoch.voters !== null) {
                     return {
                         voter: reqEpoch.voters[idx],
-                        amount: reqEpoch.vote_amounts[idx],
                         nonce: reqEpoch.vote_nonces[idx],
                         signature: reqEpoch.voter_signatures[idx]
                     } as EpochVote;
@@ -94,11 +93,12 @@ class EVMPoster {
             }),
         };
 
-        epoch.votes = epoch.votes.filter(v => v.nonce === safeMeta.nonce);
+        epoch.votes = epoch.votes.filter(v => v.nonce.toString() === safeMeta.nonce.toString());
         if (epoch.votes.length < safeMeta.threshold) {
             return null;
         }
 
+        // TODO: also we can verify the signature, to filter out invalid signature
 
         return epoch;
     }
@@ -107,11 +107,11 @@ class EVMPoster {
         let root: string = epoch.root;
         // amount and nonce match
         const eligibleVotes = epoch.votes.filter(
-            v => v.nonce === safeMeta.nonce && v.amount === epoch.total)
+            v => v.nonce.toString() === safeMeta.nonce.toString())
 
         const proposer = eligibleVotes[0].voter
         const proposerSignature = eligibleVotes[0].signature
-        let proposeAmount: string = eligibleVotes[0].amount // need to use the correct one
+        let proposeAmount: string = epoch.total
 
         console.log("000000000sig.    ", proposerSignature, base64ToBytes32(proposerSignature))
 
